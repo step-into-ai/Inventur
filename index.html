@@ -191,7 +191,14 @@
       <video id="video" autoplay playsinline></video>
       <div class="overlay-frame"></div>
     </div>
-    <button id="captureButton" class="button primary-button">Scannen</button>
+    <div class="actions" style="margin-top:0.75rem; margin-bottom:0.25rem;">
+      <label for="catalogSelect" style="font-size:0.95rem; color:#555; align-self:center;">Katalog:</label>
+      <select id="catalogSelect" class="button" style="padding-right:2rem;">
+        <option value="siemens">Siemens</option>
+        <option value="huzap">HUZAP</option>
+      </select>
+      <button id="captureButton" class="button primary-button">Scannen</button>
+    </div>
     <div id="ocr-result-section">
       <img id="captured-image" src="" alt="Gescannter Ausschnitt">
       <p>Erkannte Artikelnummer: <span id="recognizedNumber"></span></p>
@@ -251,6 +258,7 @@
     const clearButton = document.getElementById('clearButton');
     const capturedImageEl = document.getElementById('captured-image');
     const manualAddButton = document.getElementById('manualAddButton');
+    const catalogSelect = document.getElementById('catalogSelect');
 
     const quantityModal = document.getElementById('quantityModal');
     const quantityConfirm = document.getElementById('quantityConfirm');
@@ -267,6 +275,8 @@
     const candidateCancel = document.getElementById('candidateCancel');
 
     let currentRecognizedNumber = null;
+    let currentCatalog = localStorage.getItem('inventurCatalog') || 'siemens';
+    catalogSelect.value = currentCatalog;
 
     navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'environment' }, audio: false })
       .then(stream => {
@@ -286,6 +296,11 @@
     clearButton.addEventListener('click', clearData);
     manualAddButton.addEventListener('click', showManualModal);
     manualConfirm.addEventListener('click', confirmManualAdd);
+    catalogSelect.addEventListener('change', () => {
+      currentCatalog = catalogSelect.value;
+      localStorage.setItem('inventurCatalog', currentCatalog);
+      statusText.textContent = `Katalog aktiv: ${currentCatalog.toUpperCase()}`;
+    });
     candidateCancel.addEventListener('click', () => {
       candidateModal.style.display = 'none';
       statusText.textContent = 'Auswahl abgebrochen. Sie können erneut scannen oder manuell hinzufügen.';
@@ -300,7 +315,7 @@
     loadDataFromLocalStorage();
 
     async function captureFrame() {
-      statusText.textContent = 'Verarbeite Bild...';
+      statusText.textContent = `Verarbeite Bild... (${currentCatalog.toUpperCase()})`;
       const canvas = document.createElement('canvas');
       const w = video.videoWidth;
       const h = video.videoHeight;
@@ -331,7 +346,7 @@
           psm: 6
         });
 
-        const kandidaten = extractArtikelnummern(text);
+        const kandidaten = extractArtikelnummern(text, currentCatalog);
         if (kandidaten.length === 1) {
           const artikelnummer = kandidaten[0];
           currentRecognizedNumber = artikelnummer;
@@ -373,17 +388,29 @@
         .trim();
     }
 
-    function extractArtikelnummern(text) {
-      const normalized = normalizeOcrText(text);
-      const compact = normalized.replace(/\s+/g, '');
+    function getPatternsByCatalog(catalog) {
+      if (catalog === 'huzap') {
+        return [
+          /\bHUZAP[-\s]?[0-9A-Z]{3,14}\b/g,
+          /\bHZP[-\s]?[0-9A-Z]{3,14}\b/g,
+          /\b[0-9A-Z]{2,6}-[0-9A-Z]{2,8}(?:-[0-9A-Z]{1,8})?\b/g,
+          /\b[0-9A-Z]{6,16}\b/g
+        ];
+      }
 
-      // Siemens-spezifische Muster (priorisiert)
-      const patterns = [
+      // Default: Siemens
+      return [
         /\b3RV\d{4}-[0-9A-Z]{5}\b/g,                 // z.B. 3RV2011-1DA10
         /\b5SY\d{4}-\d\b/g,                           // z.B. 5SY6504-7
         /\b6ES7\s?\d{3}-[0-9A-Z]{5}-[0-9A-Z]{4}\b/g, // z.B. 6ES7 223-1BH32-0XB0
-        /\b[0-9A-Z]{3,8}-[0-9A-Z]{1,6}(?:-[0-9A-Z]{1,6})?\b/g // Fallback
+        /\b[0-9A-Z]{3,8}-[0-9A-Z]{1,6}(?:-[0-9A-Z]{1,6})?\b/g
       ];
+    }
+
+    function extractArtikelnummern(text, catalog = 'siemens') {
+      const normalized = normalizeOcrText(text);
+      const compact = normalized.replace(/\s+/g, '');
+      const patterns = getPatternsByCatalog(catalog);
 
       const candidates = [];
       for (const p of patterns) {
