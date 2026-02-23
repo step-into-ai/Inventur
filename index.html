@@ -44,12 +44,14 @@
       position: absolute;
       top: 50%;
       left: 50%;
-      width: 200px;
-      height: 100px;
+      width: 320px;
+      height: 140px;
       transform: translate(-50%, -50%);
       border: 2px solid #00ff00;
       box-sizing: border-box;
       pointer-events: none;
+      max-width: 90%;
+      max-height: 55%;
     }
     .button {
       display: inline-block;
@@ -290,8 +292,8 @@
       const ctx = canvas.getContext('2d');
       ctx.drawImage(video, 0, 0, w, h);
 
-      const frameWidth = 200;
-      const frameHeight = 100;
+      const frameWidth = 320;
+      const frameHeight = 140;
       const centerX = w / 2;
       const centerY = h / 2;
       const startX = centerX - frameWidth / 2;
@@ -307,17 +309,17 @@
       capturedImageEl.src = frameCanvas.toDataURL('image/png');
 
       try {
-        const { data: { text } } = await Tesseract.recognize(frameCanvas.toDataURL('image/png'), 'eng', {
+        const { data: { text, confidence } } = await Tesseract.recognize(frameCanvas.toDataURL('image/png'), 'eng', {
           tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ- ',
-          psm: 7
+          psm: 6
         });
-        
+
         const artikelnummer = extractArtikelnummer(text);
         if (artikelnummer) {
           currentRecognizedNumber = artikelnummer;
           recognizedNumberEl.textContent = artikelnummer;
           ocrResultSection.style.display = 'block';
-          statusText.textContent = 'Artikelnummer erkannt. Bitte Stückzahl eingeben.';
+          statusText.textContent = `Artikelnummer erkannt (OCR ${Math.round(confidence)}%). Bitte Stückzahl eingeben.`;
           showQuantityModal(artikelnummer);
         } else {
           currentRecognizedNumber = null;
@@ -330,10 +332,51 @@
       }
     }
 
+    function normalizeOcrText(text) {
+      return (text || '')
+        .toUpperCase()
+        .replace(/[—–_]/g, '-')
+        .replace(/[^A-Z0-9\-\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    function cleanupCode(code) {
+      return code
+        .toUpperCase()
+        .replace(/\s+/g, '')
+        .replace(/[—–_]/g, '-')
+        .replace(/-{2,}/g, '-')
+        .trim();
+    }
+
     function extractArtikelnummer(text) {
-      const pattern = /\b(?:[A-Z]{3}[- ]?\d{6}|\d{6}-\d{6})\b/;
-      const match = text.match(pattern);
-      return match ? match[0].replace(/\s+/g, '') : null;
+      const normalized = normalizeOcrText(text);
+      const compact = normalized.replace(/\s+/g, '');
+
+      // Siemens-spezifische Muster (priorisiert)
+      const patterns = [
+        /\b3RV\d{4}-[0-9A-Z]{5}\b/g,                 // z.B. 3RV2011-1DA10
+        /\b5SY\d{4}-\d\b/g,                           // z.B. 5SY6504-7
+        /\b6ES7\s?\d{3}-[0-9A-Z]{5}-[0-9A-Z]{4}\b/g, // z.B. 6ES7 223-1BH32-0XB0
+        /\b[0-9A-Z]{3,8}-[0-9A-Z]{1,6}(?:-[0-9A-Z]{1,6})?\b/g // Fallback
+      ];
+
+      const candidates = [];
+      for (const p of patterns) {
+        const m1 = normalized.match(p) || [];
+        const m2 = compact.match(p) || [];
+        candidates.push(...m1, ...m2);
+      }
+
+      if (!candidates.length) return null;
+
+      const cleaned = candidates
+        .map(cleanupCode)
+        .filter(c => c.length >= 6)
+        .sort((a, b) => b.length - a.length);
+
+      return cleaned[0] || null;
     }
 
     function showQuantityModal(code) {
