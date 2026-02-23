@@ -228,6 +228,15 @@
     </div>
   </div>
 
+  <div id="candidateModal" class="modal">
+    <div class="modal-content" style="max-width:420px;">
+      <h3>Artikelnummer auswählen</h3>
+      <p style="font-size:0.95rem;color:#666;">Mehrere mögliche Treffer gefunden:</p>
+      <div id="candidateList" style="display:flex;flex-direction:column;gap:0.5rem;margin-top:0.75rem;"></div>
+      <button id="candidateCancel" class="button" style="margin-top:1rem;">Abbrechen</button>
+    </div>
+  </div>
+
   <script src="https://unpkg.com/tesseract.js@2.1.4/dist/tesseract.min.js"></script>
   <script>
     let videoStream = null;
@@ -253,6 +262,10 @@
     const manualCodeInput = document.getElementById('manualCodeInput');
     const manualQuantityInput = document.getElementById('manualQuantityInput');
 
+    const candidateModal = document.getElementById('candidateModal');
+    const candidateList = document.getElementById('candidateList');
+    const candidateCancel = document.getElementById('candidateCancel');
+
     let currentRecognizedNumber = null;
 
     navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'environment' }, audio: false })
@@ -273,6 +286,10 @@
     clearButton.addEventListener('click', clearData);
     manualAddButton.addEventListener('click', showManualModal);
     manualConfirm.addEventListener('click', confirmManualAdd);
+    candidateCancel.addEventListener('click', () => {
+      candidateModal.style.display = 'none';
+      statusText.textContent = 'Auswahl abgebrochen. Sie können erneut scannen oder manuell hinzufügen.';
+    });
 
     dataTable.addEventListener('focusout', (e) => {
       if (e.target && e.target.closest('tr')) {
@@ -314,13 +331,19 @@
           psm: 6
         });
 
-        const artikelnummer = extractArtikelnummer(text);
-        if (artikelnummer) {
+        const kandidaten = extractArtikelnummern(text);
+        if (kandidaten.length === 1) {
+          const artikelnummer = kandidaten[0];
           currentRecognizedNumber = artikelnummer;
           recognizedNumberEl.textContent = artikelnummer;
           ocrResultSection.style.display = 'block';
           statusText.textContent = `Artikelnummer erkannt (OCR ${Math.round(confidence)}%). Bitte Stückzahl eingeben.`;
           showQuantityModal(artikelnummer);
+        } else if (kandidaten.length > 1) {
+          ocrResultSection.style.display = 'block';
+          recognizedNumberEl.textContent = kandidaten.join(' | ');
+          statusText.textContent = `Mehrere Artikelnummern erkannt (OCR ${Math.round(confidence)}%). Bitte auswählen.`;
+          showCandidateModal(kandidaten);
         } else {
           currentRecognizedNumber = null;
           ocrResultSection.style.display = 'none';
@@ -350,7 +373,7 @@
         .trim();
     }
 
-    function extractArtikelnummer(text) {
+    function extractArtikelnummern(text) {
       const normalized = normalizeOcrText(text);
       const compact = normalized.replace(/\s+/g, '');
 
@@ -369,14 +392,29 @@
         candidates.push(...m1, ...m2);
       }
 
-      if (!candidates.length) return null;
+      return Array.from(new Set(
+        candidates
+          .map(cleanupCode)
+          .filter(c => c.length >= 6)
+      )).sort((a, b) => b.length - a.length);
+    }
 
-      const cleaned = candidates
-        .map(cleanupCode)
-        .filter(c => c.length >= 6)
-        .sort((a, b) => b.length - a.length);
-
-      return cleaned[0] || null;
+    function showCandidateModal(codes) {
+      candidateList.innerHTML = '';
+      codes.forEach(code => {
+        const btn = document.createElement('button');
+        btn.className = 'button primary-button';
+        btn.style.marginTop = '0';
+        btn.textContent = code;
+        btn.addEventListener('click', () => {
+          currentRecognizedNumber = code;
+          recognizedNumberEl.textContent = code;
+          candidateModal.style.display = 'none';
+          showQuantityModal(code);
+        });
+        candidateList.appendChild(btn);
+      });
+      candidateModal.style.display = 'block';
     }
 
     function showQuantityModal(code) {
@@ -496,6 +534,9 @@
       }
       if (event.target == manualModal) {
         manualModal.style.display = "none";
+      }
+      if (event.target == candidateModal) {
+        candidateModal.style.display = "none";
       }
     }
 
