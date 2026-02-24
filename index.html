@@ -469,30 +469,28 @@
       const cleaned = cleanupCode(code);
       const fix = (s) => s.replace(/O/g, '0').replace(/[IL]/g, '1').replace(/B/g, '8');
 
-      // OCR liefert oft nur den hinteren Teil wie 516-3AN02-0AB0 -> 6ES7516-3AN02-0AB0
+      // Nur normalisieren, KEIN 6ES7 mehr automatisch voranstellen
       const tailOnly = cleaned.match(/^([0-9A-Z]{3})-([0-9A-Z]{5})-([0-9A-Z]{4})$/);
       if (tailOnly) {
-        return `6ES7${fix(tailOnly[1])}-${fix(tailOnly[2])}-${fix(tailOnly[3])}`;
+        return `${fix(tailOnly[1])}-${fix(tailOnly[2])}-${fix(tailOnly[3])}`;
       }
 
-      // Kompaktform normalisieren (mit oder ohne 6ES7)
-      let compact = cleaned.replace(/-/g, '');
-      compact = fix(compact);
+      let compact = fix(cleaned.replace(/-/g, ''));
 
-      // Falls Präfix fehlt, aber Länge/Struktur passt, 6ES7 ergänzen
-      if (/^[0-9A-Z]{12}$/.test(compact)) {
-        compact = `6ES7${compact}`;
-      }
-
-      // 6ES7 + 3 + 5 + 4 => 6ES7XXX-YYYYY-ZZZZ
+      // Falls mit 6ES7 erkannt: Präfix entfernen, nur Artikel-Teil behalten
       if (/^6ES7[0-9A-Z]{12}$/.test(compact)) {
-        return `${compact.slice(0, 7)}-${compact.slice(7, 12)}-${compact.slice(12, 16)}`;
+        return `${compact.slice(4, 7)}-${compact.slice(7, 12)}-${compact.slice(12, 16)}`;
       }
 
-      // Falls bereits mit Trennstrichen vorhanden: segmentweise normalisieren
-      return cleaned.replace(/^6ES7([0-9A-Z]{3})-([0-9A-Z]{5})-([0-9A-Z]{4})$/, (_, a, b, c) => {
-        return `6ES7${fix(a)}-${fix(b)}-${fix(c)}`;
-      });
+      // Falls ohne 6ES7 aber 12-stellig: nur segmentieren (kein Prefix)
+      if (/^[0-9A-Z]{12}$/.test(compact)) {
+        return `${compact.slice(0, 3)}-${compact.slice(3, 8)}-${compact.slice(8, 12)}`;
+      }
+
+      // Falls bereits mit Trennstrichen vorhanden und ggf. mit 6ES7
+      return cleaned
+        .replace(/^6ES7([0-9A-Z]{3})-([0-9A-Z]{5})-([0-9A-Z]{4})$/, (_, a, b, c) => `${fix(a)}-${fix(b)}-${fix(c)}`)
+        .replace(/^([0-9A-Z]{3})-([0-9A-Z]{5})-([0-9A-Z]{4})$/, (_, a, b, c) => `${fix(a)}-${fix(b)}-${fix(c)}`);
     }
 
     function getPatternsByCatalog(catalog) {
@@ -567,9 +565,7 @@
       if (catalog === 'siemens') {
         const score = (code) => {
           let s = 0;
-          if (/^6ES7[0-9A-Z]{3}-[0-9A-Z]{5}-[0-9A-Z]{4}$/.test(code)) s += 120;
-          if (code.startsWith('6ES7')) s += 50;
-          if (/^[0-9]{3}-[0-9A-Z]{5}-[0-9A-Z]{4}$/.test(code)) s += 20;
+          if (/^[0-9]{3}-[0-9A-Z]{5}-[0-9A-Z]{4}$/.test(code)) s += 120;
           if (/^[A-Z0-9\-]+$/.test(code)) s += 5;
           s += Math.min(code.length, 24) / 10;
           return s;
