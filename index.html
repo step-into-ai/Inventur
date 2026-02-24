@@ -467,14 +467,28 @@
 
     function normalizeSiemensCandidate(code) {
       const cleaned = cleanupCode(code);
+
+      // OCR-Fehlertoleranz (vorsichtig): O->0, I/L->1, B->8, S->5 in Alphanumerik-Blöcken
+      // Präfix bleibt als 6ES7 erhalten, danach normalisieren wir Block-weise.
       const compact = cleaned.replace(/-/g, '');
+      const compactFixed = compact
+        .replace(/^6ES7/, '6ES7')
+        .replace(/^6ES7(.+)$/, (_, tail) => `6ES7${tail
+          .replace(/O/g, '0')
+          .replace(/[IL]/g, '1')
+          .replace(/B/g, '8')}`);
 
       // 6ES7 + 3 + 5 + 4  => 6ES7XXX-YYYYY-ZZZZ
-      if (/^6ES7[0-9A-Z]{3}[0-9A-Z]{5}[0-9A-Z]{4}$/.test(compact)) {
-        return `${compact.slice(0, 7)}-${compact.slice(7, 12)}-${compact.slice(12, 16)}`;
+      if (/^6ES7[0-9A-Z]{3}[0-9A-Z]{5}[0-9A-Z]{4}$/.test(compactFixed)) {
+        return `${compactFixed.slice(0, 7)}-${compactFixed.slice(7, 12)}-${compactFixed.slice(12, 16)}`;
       }
 
-      return cleaned;
+      // Falls bereits mit Trennstrichen vorhanden: segmentweise normalisieren
+      return cleaned
+        .replace(/^6ES7([0-9A-Z]{3})-([0-9A-Z]{5})-([0-9A-Z]{4})$/, (_, a, b, c) => {
+          const fix = (s) => s.replace(/O/g, '0').replace(/[IL]/g, '1').replace(/B/g, '8');
+          return `6ES7${fix(a)}-${fix(b)}-${fix(c)}`;
+        });
     }
 
     function getPatternsByCatalog(catalog) {
