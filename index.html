@@ -459,10 +459,22 @@
     function cleanupCode(code) {
       return code
         .toUpperCase()
+        .replace(/\s*[-—–_]\s*/g, '-')
         .replace(/\s+/g, '')
-        .replace(/[—–_]/g, '-')
         .replace(/-{2,}/g, '-')
         .trim();
+    }
+
+    function normalizeSiemensCandidate(code) {
+      const cleaned = cleanupCode(code);
+      const compact = cleaned.replace(/-/g, '');
+
+      // 6ES7 + 3 + 5 + 4  => 6ES7XXX-YYYYY-ZZZZ
+      if (/^6ES7[0-9A-Z]{3}[0-9A-Z]{5}[0-9A-Z]{4}$/.test(compact)) {
+        return `${compact.slice(0, 7)}-${compact.slice(7, 12)}-${compact.slice(12, 16)}`;
+      }
+
+      return cleaned;
     }
 
     function getPatternsByCatalog(catalog) {
@@ -477,9 +489,11 @@
 
       // Default: Siemens
       return [
-        /\b3RV\d{4}-[0-9A-Z]{5}\b/g,                 // z.B. 3RV2011-1DA10
-        /\b5SY\d{4}-\d\b/g,                           // z.B. 5SY6504-7
-        /\b6ES7\s?\d{3}-[0-9A-Z]{5}-[0-9A-Z]{4}\b/g, // z.B. 6ES7 223-1BH32-0XB0
+        /\b3RV\d{4}-[0-9A-Z]{5}\b/g, // z.B. 3RV2011-1DA10
+        /\b5SY\d{4}-\d\b/g, // z.B. 5SY6504-7
+        /\b6ES7\s?\d{3}\s*-\s*[0-9A-Z]{5}\s*-\s*[0-9A-Z]{4}\b/g, // z.B. 6ES7 516-3AN02-0AB0
+        /\b6\s?E\s?S\s?7\s?\d{3}\s*-\s*[0-9A-Z]{5}\s*-\s*[0-9A-Z]{4}\b/g, // toleranter OCR-Fall: 6 E S 7 ...
+        /\b6ES7[0-9A-Z]{12}\b/g, // kompakter OCR-Fall ohne Bindestriche
         /\b[0-9A-Z]{3,8}-[0-9A-Z]{1,6}(?:-[0-9A-Z]{1,6})?\b/g
       ];
     }
@@ -498,7 +512,7 @@
 
       return Array.from(new Set(
         candidates
-          .map(cleanupCode)
+          .map(c => catalog === 'siemens' ? normalizeSiemensCandidate(c) : cleanupCode(c))
           .filter(c => c.length >= 6)
       )).sort((a, b) => b.length - a.length);
     }
