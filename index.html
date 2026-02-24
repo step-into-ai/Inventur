@@ -401,12 +401,11 @@
       const ctx = canvas.getContext('2d');
       ctx.drawImage(video, 0, 0, w, h);
 
-      const frameWidth = 320;
-      const frameHeight = 140;
-      const centerX = w / 2;
-      const centerY = h / 2;
-      const startX = centerX - frameWidth / 2;
-      const startY = centerY - frameHeight / 2;
+      // Ganze Kamera-Fläche scannen (statt kleinem Center-Ausschnitt)
+      const frameWidth = w;
+      const frameHeight = h;
+      const startX = 0;
+      const startY = 0;
       const frameData = ctx.getImageData(startX, startY, frameWidth, frameHeight);
 
       const frameCanvas = document.createElement('canvas');
@@ -420,10 +419,14 @@
       try {
         const { data: { text, confidence } } = await Tesseract.recognize(frameCanvas.toDataURL('image/png'), 'eng', {
           tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ- ',
-          psm: 6
+          psm: 11
         });
 
-        const kandidaten = extractArtikelnummern(text, currentCatalog);
+        const kandidaten = mergeCandidates(
+          extractArtikelnummern(text, currentCatalog),
+          extractRawOcrBlocks(text, currentCatalog),
+          currentCatalog
+        );
         if (kandidaten.length === 1) {
           const artikelnummer = kandidaten[0];
           currentRecognizedNumber = artikelnummer;
@@ -528,17 +531,34 @@
         candidates.push(...m1, ...m2);
       }
 
-      const unique = Array.from(new Set(
+      return Array.from(new Set(
         candidates
           .map(c => catalog === 'siemens' ? normalizeSiemensCandidate(c) : cleanupCode(c))
           .filter(c => c.length >= 6)
+      ));
+    }
+
+    function extractRawOcrBlocks(text, catalog = 'siemens') {
+      const lines = (text || '')
+        .split(/\r?\n/)
+        .map(l => normalizeOcrText(l))
+        .filter(l => l.length >= 6)
+        .map(l => cleanupCode(l));
+
+      return lines.map(l => catalog === 'siemens' ? normalizeSiemensCandidate(l) : l);
+    }
+
+    function mergeCandidates(patternCandidates, rawCandidates, catalog = 'siemens') {
+      const unique = Array.from(new Set(
+        [...patternCandidates, ...rawCandidates].filter(Boolean)
       ));
 
       if (catalog === 'siemens') {
         const score = (code) => {
           let s = 0;
-          if (/^6ES7[0-9A-Z]{3}-[0-9A-Z]{5}-[0-9A-Z]{4}$/.test(code)) s += 100;
-          if (code.startsWith('6ES7')) s += 40;
+          if (/^6ES7[0-9A-Z]{3}-[0-9A-Z]{5}-[0-9A-Z]{4}$/.test(code)) s += 120;
+          if (code.startsWith('6ES7')) s += 50;
+          if (/^[0-9]{3}-[0-9A-Z]{5}-[0-9A-Z]{4}$/.test(code)) s += 20;
           if (/^[A-Z0-9\-]+$/.test(code)) s += 5;
           s += Math.min(code.length, 24) / 10;
           return s;
