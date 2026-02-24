@@ -501,10 +501,11 @@
     function getPatternsByCatalog(catalog) {
       if (catalog === 'huzap') {
         return [
-          /\bHUZAP[-\s]?[0-9A-Z]{3,14}\b/g,
-          /\bHZP[-\s]?[0-9A-Z]{3,14}\b/g,
-          /\b[0-9A-Z]{2,6}-[0-9A-Z]{2,8}(?:-[0-9A-Z]{1,8})?\b/g,
-          /\b[0-9A-Z]{6,16}\b/g
+          /\b\d{6}\s*-\s*\d{6}\b/g, // Kernformat: 123456-123456
+          /\b\d{12}\b/g,              // OCR ohne Trennstrich: 123456123456
+          /\bHUZAP[-\s]?\d{3,14}\b/g,
+          /\bHZP[-\s]?\d{3,14}\b/g,
+          /\b[0-9A-Z]{2,6}-[0-9A-Z]{2,8}(?:-[0-9A-Z]{1,8})?\b/g
         ];
       }
 
@@ -517,6 +518,15 @@
         /\b6ES7[0-9A-Z]{12}\b/g, // kompakter OCR-Fall ohne Bindestriche
         /\b[0-9A-Z]{3,8}-[0-9A-Z]{1,6}(?:-[0-9A-Z]{1,6})?\b/g
       ];
+    }
+
+    function normalizeHuzapCandidate(code) {
+      const cleaned = cleanupCode(code);
+      const compactDigits = cleaned.replace(/-/g, '');
+      if (/^\d{12}$/.test(compactDigits)) {
+        return `${compactDigits.slice(0, 6)}-${compactDigits.slice(6, 12)}`;
+      }
+      return cleaned;
     }
 
     function extractArtikelnummern(text, catalog = 'siemens') {
@@ -533,7 +543,11 @@
 
       return Array.from(new Set(
         candidates
-          .map(c => catalog === 'siemens' ? normalizeSiemensCandidate(c) : cleanupCode(c))
+          .map(c => {
+            if (catalog === 'siemens') return normalizeSiemensCandidate(c);
+            if (catalog === 'huzap') return normalizeHuzapCandidate(c);
+            return cleanupCode(c);
+          })
           .filter(c => c.length >= 6)
       ));
     }
@@ -549,9 +563,9 @@
     }
 
     function mergeCandidates(patternCandidates, rawCandidates, catalog = 'siemens') {
-      const unique = Array.from(new Set(
-        [...patternCandidates, ...rawCandidates].filter(Boolean)
-      ));
+      // Für HUZAP bewusst nur Pattern-Treffer nutzen (alte, stabile Logik)
+      const base = catalog === 'huzap' ? patternCandidates : [...patternCandidates, ...rawCandidates];
+      const unique = Array.from(new Set(base.filter(Boolean)));
 
       if (catalog === 'siemens') {
         const score = (code) => {
@@ -561,6 +575,18 @@
           if (/^[0-9]{3}-[0-9A-Z]{5}-[0-9A-Z]{4}$/.test(code)) s += 20;
           if (/^[A-Z0-9\-]+$/.test(code)) s += 5;
           s += Math.min(code.length, 24) / 10;
+          return s;
+        };
+        return unique.sort((a, b) => score(b) - score(a));
+      }
+
+      if (catalog === 'huzap') {
+        const score = (code) => {
+          let s = 0;
+          if (/^\d{6}-\d{6}$/.test(code)) s += 120;
+          if (/^\d{12}$/.test(code)) s += 80;
+          if (/^[A-Z0-9\-]+$/.test(code)) s += 5;
+          s += Math.min(code.length, 20) / 10;
           return s;
         };
         return unique.sort((a, b) => score(b) - score(a));
