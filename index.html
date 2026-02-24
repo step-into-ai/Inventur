@@ -197,6 +197,8 @@
         <option value="siemens">Siemens</option>
         <option value="huzap">HUZAP</option>
       </select>
+      <label for="cameraSelect" style="font-size:0.95rem; color:#555; align-self:center;">Kamera:</label>
+      <select id="cameraSelect" class="button" style="padding-right:2rem; max-width:220px;"></select>
       <button id="captureButton" class="button primary-button">Scannen</button>
     </div>
     <div id="ocr-result-section">
@@ -259,6 +261,7 @@
     const capturedImageEl = document.getElementById('captured-image');
     const manualAddButton = document.getElementById('manualAddButton');
     const catalogSelect = document.getElementById('catalogSelect');
+    const cameraSelect = document.getElementById('cameraSelect');
 
     const quantityModal = document.getElementById('quantityModal');
     const quantityConfirm = document.getElementById('quantityConfirm');
@@ -276,18 +279,8 @@
 
     let currentRecognizedNumber = null;
     let currentCatalog = localStorage.getItem('inventurCatalog') || 'siemens';
+    let selectedCameraId = localStorage.getItem('inventurCameraId') || '';
     catalogSelect.value = currentCatalog;
-
-    navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'environment' }, audio: false })
-      .then(stream => {
-        videoStream = stream;
-        video.srcObject = stream;
-        video.play();
-      })
-      .catch(err => {
-        console.error("Kamerazugriff verweigert oder nicht möglich:", err);
-        alert("Kamera kann nicht gestartet werden.");
-      });
 
     captureButton.addEventListener('click', captureFrame);
     quantityConfirm.addEventListener('click', confirmQuantity);
@@ -301,6 +294,11 @@
       localStorage.setItem('inventurCatalog', currentCatalog);
       statusText.textContent = `Katalog aktiv: ${currentCatalog.toUpperCase()}`;
     });
+    cameraSelect.addEventListener('change', async () => {
+      selectedCameraId = cameraSelect.value;
+      localStorage.setItem('inventurCameraId', selectedCameraId);
+      await startCamera(selectedCameraId);
+    });
     candidateCancel.addEventListener('click', () => {
       candidateModal.style.display = 'none';
       statusText.textContent = 'Auswahl abgebrochen. Sie können erneut scannen oder manuell hinzufügen.';
@@ -313,6 +311,85 @@
     });
 
     loadDataFromLocalStorage();
+    initCamera();
+
+    async function initCamera() {
+      cameraSelect.innerHTML = '<option value="">Kamera wird geladen...</option>';
+      try {
+        await startCamera(selectedCameraId);
+        await refreshCameraDevices();
+      } catch (err) {
+        console.error('Kamera-Initialisierung fehlgeschlagen:', err);
+        alert('Kamera kann nicht gestartet werden.');
+      }
+    }
+
+    async function startCamera(cameraId = '') {
+      if (videoStream) {
+        videoStream.getTracks().forEach(track => track.stop());
+      }
+
+      const baseConstraints = {
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      };
+
+      const videoConstraints = cameraId
+        ? { ...baseConstraints, deviceId: { exact: cameraId } }
+        : { ...baseConstraints, facingMode: 'environment' };
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: false });
+        videoStream = stream;
+        video.srcObject = stream;
+        await video.play();
+        const activeLabel = stream.getVideoTracks()[0]?.label || 'Kamera aktiv';
+        statusText.textContent = `${activeLabel} · Katalog: ${currentCatalog.toUpperCase()}`;
+      } catch (err) {
+        if (cameraId) {
+          console.warn('Gewählte Kamera fehlgeschlagen, fallback auf environment:', err);
+          const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: { ...baseConstraints, facingMode: 'environment' }, audio: false });
+          videoStream = fallbackStream;
+          video.srcObject = fallbackStream;
+          await video.play();
+          statusText.textContent = `Kamera-Fallback aktiv · Katalog: ${currentCatalog.toUpperCase()}`;
+          return;
+        }
+        throw err;
+      }
+    }
+
+    function rankCameraLabel(label) {
+      const l = (label || '').toLowerCase();
+      if (l.includes('back') || l.includes('rear') || l.includes('environment')) return 0;
+      if (l.includes('wide') || l.includes('ultra')) return 1;
+      if (l.includes('tele')) return 2;
+      if (l.includes('front') || l.includes('user')) return 9;
+      return 5;
+    }
+
+    async function refreshCameraDevices() {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cameras = devices.filter(d => d.kind === 'videoinput');
+
+      if (!cameras.length) {
+        cameraSelect.innerHTML = '<option value="">Keine Kamera gefunden</option>';
+        return;
+      }
+
+      cameras.sort((a, b) => rankCameraLabel(a.label) - rankCameraLabel(b.label));
+
+      if (!selectedCameraId || !cameras.some(c => c.deviceId === selectedCameraId)) {
+        selectedCameraId = cameras[0].deviceId;
+        localStorage.setItem('inventurCameraId', selectedCameraId);
+      }
+
+      cameraSelect.innerHTML = cameras.map((cam, idx) => {
+        const name = cam.label || `Kamera ${idx + 1}`;
+        const selected = cam.deviceId === selectedCameraId ? 'selected' : '';
+        return `<option value="${cam.deviceId}" ${selected}>${name}</option>`;
+      }).join('');
+    }
 
     async function captureFrame() {
       statusText.textContent = `Verarbeite Bild... (${currentCatalog.toUpperCase()})`;
